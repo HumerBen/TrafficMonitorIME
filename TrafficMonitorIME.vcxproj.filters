@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="源文件">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="头文件">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="接口">
+      <UniqueIdentifier>{AC2C2A3D-4B3A-4B1A-9C2A-1B3A4C5D6E7F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="文档">
+      <UniqueIdentifier>{B7E9D8C7-A6B5-4C4D-8E3F-2A1B0C9D8E7F}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\dllmain.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\IMEItem.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\IMEStatusPlugin.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClInclude Include="include\PluginInterface.h"><Filter>接口</Filter></ClInclude>
+    <ClInclude Include="src\IMEItem.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\IMEStatusPlugin.h"><Filter>头文件</Filter></ClInclude>
+    <None Include="README.md"><Filter>文档</Filter></None>
+    <None Include=".gitignore"><Filter>文档</Filter></None>
+  </ItemGroup>
+</Project>

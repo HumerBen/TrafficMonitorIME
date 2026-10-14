@@ -1,0 +1,33 @@
+# ===== Visual Studio / MSBuild 生成产物（不入库）=====
+x64/
+Debug/
+Release/
+.vs/
+*.obj
+*.pch
+*.pdb
+*.idb
+*.ilk
+*.exp
+*.res
+*.aps
+*.suo
+*.user
+*.tlog
+*.log
+
+# ===== 编译出来的 DLL / EXE（本地生成，不入库）=====
+*.dll
+*.exe
+*.lib
+
+# ===== 备注 =====
+# 源码（.h/.cpp/.sln/.vcxproj/.filters/README.md/.gitignore）都会被 git 跟踪。
+# 生成的 TrafficMonitorIME.dll 在本地编译后请手动复制到 TrafficMonitor\plugins\，
+# 不要把它提交进本仓库。
+
+# ===== 中间目录 / 工具目录（不入库）=====
+# MSBuild 中间目录（含 .tlog/.json 等）
+TrafficMonitorIME.1A2B3C4D/
+# 本项目的 CodeBuddy 工作记忆（跨会话记忆，不入库）
+.codebuddy/
