@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <imm.h>
 #include <cstdarg>
+#include <cstdio>
 #pragma comment(lib, "imm32.lib")
 
 // 这两个 WM_IME_CONTROL 的 wParam 值按 IMM32 约定存在，但 SDK 头文件未公开定义
@@ -189,6 +190,11 @@ CIMEItem::CIMEItem()
 
 CIMEItem::~CIMEItem()
 {
+    if (m_hFont != nullptr)
+    {
+        ::DeleteObject(m_hFont);
+        m_hFont = nullptr;
+    }
 }
 
 const wchar_t* CIMEItem::GetItemName() const
@@ -254,16 +260,128 @@ void CIMEItem::DrawItem(void* hDC, int x, int y, int w, int h, bool dark_mode)
     if (dc == NULL)
         return;
 
-    // 不绘制背景色块，只显示“中 / 英”文字。背景由主程序统一处理。
-    // 文字配色仍适配深色 / 浅色模式，并保证在各自背景下清晰可见：
-    //   中文用红色（提示已进入中文输入态），英文用中性灰。
-    COLORREF fg = m_isChinese
-        ? (dark_mode ? RGB(255, 120, 120) : RGB(200, 40, 40))
-        : (dark_mode ? RGB(215, 215, 215) : RGB(60, 60, 60));
+    // 不绘制背景色块，只显示“中 / 英”文字，背景由主程序统一处理。
+    // 文字颜色取自用户设置（“插件管理 -> 选项”里可自定义）
+    const COLORREF fg = dark_mode
+        ? (m_isChinese ? m_appearance.colors.chinese_dark : m_appearance.colors.english_dark)
+        : (m_isChinese ? m_appearance.colors.chinese_light : m_appearance.colors.english_light);
 
-    // 画文字（透明背景）
     RECT rc = { x, y, x + w, y + h };
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, fg);
+
+    HGDIOBJ oldFont = (m_hFont != nullptr) ? SelectObject(dc, m_hFont) : nullptr;
     DrawText(dc, m_value.c_str(), -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    if (oldFont != nullptr)
+        SelectObject(dc, oldFont);
+}
+
+//------------------------------------------------------------------
+// 外观配置（颜色 + 字体）的读写：保存在插件配置目录下的 TrafficMonitorIME.ini
+//------------------------------------------------------------------
+namespace
+{
+    const wchar_t* const kConfigFileName = L"TrafficMonitorIME.ini";
+    const wchar_t* const kColorSection   = L"Colors";
+    const wchar_t* const kFontSection    = L"Font";
+
+    std::wstring GetConfigFilePath(const std::wstring& config_dir)
+    {
+        if (config_dir.empty())
+            return std::wstring();
+
+        std::wstring path = config_dir;
+        if (path.back() != L'\\' && path.back() != L'/')
+            path += L'\\';
+        path += kConfigFileName;
+        return path;
+    }
+
+    COLORREF ReadColor(const std::wstring& path, const wchar_t* key, COLORREF def)
+    {
+        return static_cast<COLORREF>(GetPrivateProfileIntW(kColorSection, key,
+                                                           static_cast<INT>(def & 0x00FFFFFF),
+                                                           path.c_str()));
+    }
+
+    void WriteColor(const std::wstring& path, const wchar_t* key, COLORREF color)
+    {
+        wchar_t buf[16]{};
+        swprintf_s(buf, L"%u", static_cast<unsigned>(color & 0x00FFFFFF));
+        WritePrivateProfileStringW(kColorSection, key, buf, path.c_str());
+    }
+
+    std::wstring ReadString(const std::wstring& path, const wchar_t* key)
+    {
+        wchar_t buf[64]{};
+        GetPrivateProfileStringW(kFontSection, key, L"", buf,
+                                 static_cast<DWORD>(_countof(buf)), path.c_str());
+        return std::wstring(buf);
+    }
+}
+
+void CIMEItem::UpdateFont()
+{
+    if (m_hFont != nullptr)
+    {
+        ::DeleteObject(m_hFont);
+        m_hFont = nullptr;
+    }
+    if (m_appearance.fontSize <= 0)
+        return;   // 系统默认字体
+
+    HDC dc = ::GetDC(nullptr);
+    const int dpiY = (dc != nullptr) ? ::GetDeviceCaps(dc, LOGPIXELSY) : 96;
+    if (dc != nullptr)
+        ::ReleaseDC(nullptr, dc);
+
+    LOGFONTW lf{};
+    lf.lfHeight = -::MulDiv(m_appearance.fontSize, dpiY, 72);
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfQuality = CLEARTYPE_QUALITY;
+    lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    ::wcscpy_s(lf.lfFaceName, m_appearance.fontName.empty() ? L"Microsoft YaHei" : m_appearance.fontName.c_str());
+    m_hFont = ::CreateFontIndirectW(&lf);
+}
+
+void CIMEItem::SetAppearance(const IMEAppearance& appearance)
+{
+    m_appearance = appearance;
+    UpdateFont();
+}
+
+void CIMEItem::LoadAppearance(const std::wstring& config_dir)
+{
+    const std::wstring path = GetConfigFilePath(config_dir);
+    if (path.empty())
+        return;
+
+    // 读不到的键一律回退到默认值
+    const IMEColors def;
+    m_appearance.colors.chinese_dark  = ReadColor(path, L"ChineseColorDark",  def.chinese_dark);
+    m_appearance.colors.english_dark  = ReadColor(path, L"EnglishColorDark",  def.english_dark);
+    m_appearance.colors.chinese_light = ReadColor(path, L"ChineseColorLight", def.chinese_light);
+    m_appearance.colors.english_light = ReadColor(path, L"EnglishColorLight", def.english_light);
+
+    m_appearance.fontName = ReadString(path, L"FaceName");
+    m_appearance.fontSize = static_cast<int>(GetPrivateProfileIntW(kFontSection, L"Size", 0, path.c_str()));
+
+    UpdateFont();
+}
+
+void CIMEItem::SaveAppearance(const std::wstring& config_dir) const
+{
+    const std::wstring path = GetConfigFilePath(config_dir);
+    if (path.empty())
+        return;
+
+    WriteColor(path, L"ChineseColorDark",  m_appearance.colors.chinese_dark);
+    WriteColor(path, L"EnglishColorDark",  m_appearance.colors.english_dark);
+    WriteColor(path, L"ChineseColorLight", m_appearance.colors.chinese_light);
+    WriteColor(path, L"EnglishColorLight", m_appearance.colors.english_light);
+
+    WritePrivateProfileStringW(kFontSection, L"FaceName", m_appearance.fontName.c_str(), path.c_str());
+    wchar_t buf[16]{};
+    swprintf_s(buf, L"%d", m_appearance.fontSize);
+    WritePrivateProfileStringW(kFontSection, L"Size", buf, path.c_str());
 }

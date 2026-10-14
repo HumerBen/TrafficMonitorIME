@@ -75,13 +75,16 @@
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\IMEItem.cpp" />
     <ClCompile Include="src\IMEStatusPlugin.cpp" />
+    <ClCompile Include="src\OptionsDialog.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\PluginInterface.h" />
     <ClInclude Include="src\IMEItem.h" />
     <ClInclude Include="src\IMEStatusPlugin.h" />
+    <ClInclude Include="src\OptionsDialog.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".codebuddy\memory\2026-10-14.md" />
     <None Include=".gitignore" />
     <None Include="README.md" />
   </ItemGroup>
