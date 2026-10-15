@@ -237,21 +237,32 @@ int CIMEItem::GetItemWidth() const
     return 24;
 }
 
-void CIMEItem::Update()
+bool CIMEItem::Update()
 {
     ImeQuery q = QueryImeState();
 
     // 关键：IME 状态是按“前台窗口线程”隔离的，而且 ImmGetContext 对别的进程的
     // 窗口会返回 NULL，所以这里用两条路径依次尝试，任一成功即采用。
+    bool changed = false;
     if (q.valid)
-        m_isChinese = q.chinese;
+    {
+        const bool newChinese = q.chinese;
+        changed = (newChinese != m_isChinese);   // 仅当“中 <-> 英”真正翻转才算变化
+        m_isChinese = newChinese;
+    }
     // 两条路径都失败时保留上一次的结果，避免状态来回跳
 
     m_value = m_isChinese ? L"中" : L"英";
 
-    LogOnChange(Format(L"valid=%d queried=%d shown=%s via=%s | %s",
+    LogOnChange(Format(L"valid=%d queried=%d shown=%s via=%s changed=%d | %s",
                        q.valid ? 1 : 0, q.chinese ? 1 : 0,
-                       m_value.c_str(), q.via, q.detail.c_str()));
+                       m_value.c_str(), q.via, changed ? 1 : 0, q.detail.c_str()));
+    return changed;
+}
+
+void CIMEItem::SetApp(ITrafficMonitor* app)
+{
+    m_app = app;
 }
 
 void CIMEItem::DrawItem(void* hDC, int x, int y, int w, int h, bool dark_mode)
@@ -284,6 +295,15 @@ namespace
     const wchar_t* const kConfigFileName = L"TrafficMonitorIME.ini";
     const wchar_t* const kColorSection   = L"Colors";
     const wchar_t* const kFontSection    = L"Font";
+    const wchar_t* const kBehaviorSection = L"Behavior";
+
+    // 轮询间隔允许的范围（毫秒）
+    int ClampInterval(int ms)
+    {
+        if (ms < 16)   return 16;
+        if (ms > 2000) return 2000;
+        return ms;
+    }
 
     std::wstring GetConfigFilePath(const std::wstring& config_dir)
     {
@@ -366,6 +386,11 @@ void CIMEItem::LoadAppearance(const std::wstring& config_dir)
     m_appearance.fontName = ReadString(path, L"FaceName");
     m_appearance.fontSize = static_cast<int>(GetPrivateProfileIntW(kFontSection, L"Size", 0, path.c_str()));
 
+    // 刷新行为：默认开启实时刷新，间隔 100ms
+    m_appearance.realtimePoll = (GetPrivateProfileIntW(kBehaviorSection, L"RealtimePoll", 1, path.c_str()) != 0);
+    m_appearance.pollIntervalMs = ClampInterval(
+        static_cast<int>(GetPrivateProfileIntW(kBehaviorSection, L"PollIntervalMs", 200, path.c_str())));
+
     UpdateFont();
 }
 
@@ -384,4 +409,8 @@ void CIMEItem::SaveAppearance(const std::wstring& config_dir) const
     wchar_t buf[16]{};
     swprintf_s(buf, L"%d", m_appearance.fontSize);
     WritePrivateProfileStringW(kFontSection, L"Size", buf, path.c_str());
+
+    WritePrivateProfileStringW(kBehaviorSection, L"RealtimePoll", m_appearance.realtimePoll ? L"1" : L"0", path.c_str());
+    swprintf_s(buf, L"%d", m_appearance.pollIntervalMs);
+    WritePrivateProfileStringW(kBehaviorSection, L"PollIntervalMs", buf, path.c_str());
 }

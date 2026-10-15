@@ -1,9 +1,13 @@
 #include "OptionsDialog.h"
 #include <commdlg.h>
+#include <commctrl.h>
 #include <cstdio>
+#include <cstdlib>
+#include <cwchar>
 #include <string>
 
 #pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "comctl32.lib")
 
 //=============================================================================
 // 本工程没有 .rc 资源文件，所以选项对话框完全用代码创建：
@@ -16,7 +20,7 @@ namespace
 
     // 96 DPI(100%) 下的客户区尺寸，实际会按系统 DPI 放大
     const int kClientW = 360;
-    const int kClientH = 300;
+    const int kClientH = 372;
 
     // 控件 ID
     enum : int
@@ -35,17 +39,25 @@ namespace
         IDC_PREVIEW,
         IDC_BTN_RESTORE_DEFAULT = 1020,
         IDC_BTN_FONT,
+
+        IDC_LBL_INTERVAL = 1030,
+        IDC_CHK_REALTIME,
+        IDC_EDT_INTERVAL,
+        IDC_SPIN_INTERVAL,
     };
 
     struct DialogContext
     {
-        IMEAppearance cfg;                  // 编辑中的外观（颜色 + 字体）
+        IMEAppearance cfg;                  // 编辑中的外观（颜色 + 字体 + 刷新行为）
         bool       ok{ false };             // 是否点了“确定”
         HFONT      hFont{ nullptr };        // 对话框 UI 字体
         int        scale{ 100 };            // DPI 缩放百分比（96 DPI = 100）
         HWND       hColorBtns[4]{};         // 4 个颜色按钮
         HWND       hPreview{ nullptr };     // 预览区
         HWND       hFontBtn{ nullptr };     // “字体...”按钮
+        HWND       hRealtimeChk{ nullptr }; // “启用实时刷新”复选框
+        HWND       hIntervalEdit{ nullptr }; // 刷新间隔编辑框（毫秒）
+        HWND       hIntervalSpin{ nullptr }; // 间隔微调按钮
     };
 
     // 把 96 DPI 下的尺寸换算成当前 DPI 下的像素
@@ -332,9 +344,28 @@ namespace
             ctx->hFontBtn = CreateChild(hWnd, L"BUTTON", L"系统默认字体", BS_PUSHBUTTON | WS_TABSTOP, 148, 218, 174, 28, IDC_BTN_FONT, ctx);
             UpdateFontButtonText(ctx->hFontBtn, ctx->cfg.fontName, ctx->cfg.fontSize);
 
-            CreateChild(hWnd, L"BUTTON", L"恢复默认", BS_PUSHBUTTON | WS_TABSTOP, 12, 262, 100, 32, IDC_BTN_RESTORE_DEFAULT, ctx);
-            CreateChild(hWnd, L"BUTTON", L"确定", BS_DEFPUSHBUTTON | WS_TABSTOP, 176, 262, 84, 32, IDOK, ctx);
-            CreateChild(hWnd, L"BUTTON", L"取消", BS_PUSHBUTTON | WS_TABSTOP, 268, 262, 84, 32, IDCANCEL, ctx);
+            // 实时刷新设置（独立于全局监控时间间隔的后台轮询）
+            CreateChild(hWnd, L"BUTTON", L"实时刷新", BS_GROUPBOX, 12, 248, 336, 78, -1, ctx);
+            ctx->hRealtimeChk = CreateChild(hWnd, L"BUTTON", L"启用实时刷新（输入法切换即时更新）",
+                                            BS_AUTOCHECKBOX | WS_TABSTOP, 24, 264, 320, 22, IDC_CHK_REALTIME, ctx);
+            ::SendMessageW(ctx->hRealtimeChk, BM_SETCHECK,
+                           ctx->cfg.realtimePoll ? BST_CHECKED : BST_UNCHECKED, 0);
+
+            CreateChild(hWnd, L"STATIC", L"刷新间隔(毫秒)：", SS_RIGHT, 24, 298, 150, 20, IDC_LBL_INTERVAL, ctx);
+            ctx->hIntervalEdit = CreateChild(hWnd, L"EDIT", L"", ES_NUMBER | WS_BORDER | WS_TABSTOP,
+                                             180, 294, 60, 22, IDC_EDT_INTERVAL, ctx);
+            ctx->hIntervalSpin = CreateChild(hWnd, L"msctls_updown32", L"",
+                                            UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS | WS_TABSTOP,
+                                            244, 294, 18, 22, IDC_SPIN_INTERVAL, ctx);
+            ::SendMessageW(ctx->hIntervalSpin, UDM_SETBUDDY, reinterpret_cast<WPARAM>(ctx->hIntervalEdit), 0);
+            ::SendMessageW(ctx->hIntervalSpin, UDM_SETRANGE32, 16, 2000);
+            ::SetWindowTextW(ctx->hIntervalEdit, std::to_wstring(ctx->cfg.pollIntervalMs).c_str());
+            ::EnableWindow(ctx->hIntervalEdit, ctx->cfg.realtimePoll);
+            ::EnableWindow(ctx->hIntervalSpin, ctx->cfg.realtimePoll);
+
+            CreateChild(hWnd, L"BUTTON", L"恢复默认", BS_PUSHBUTTON | WS_TABSTOP, 12, 330, 100, 32, IDC_BTN_RESTORE_DEFAULT, ctx);
+            CreateChild(hWnd, L"BUTTON", L"确定", BS_DEFPUSHBUTTON | WS_TABSTOP, 176, 330, 84, 32, IDOK, ctx);
+            CreateChild(hWnd, L"BUTTON", L"取消", BS_PUSHBUTTON | WS_TABSTOP, 268, 330, 84, 32, IDCANCEL, ctx);
 
             if (ctx->hFont != nullptr)
             {
@@ -395,15 +426,37 @@ namespace
                     RefreshControls(ctx);
                 }
                 return 0;
+            case IDC_CHK_REALTIME:
+                if (HIWORD(wParam) == BN_CLICKED)
+                {
+                    ctx->cfg.realtimePoll = (::SendMessageW(ctx->hRealtimeChk, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                    ::EnableWindow(ctx->hIntervalEdit, ctx->cfg.realtimePoll);
+                    ::EnableWindow(ctx->hIntervalSpin, ctx->cfg.realtimePoll);
+                }
+                return 0;
             case IDC_BTN_RESTORE_DEFAULT:
                 ctx->cfg = IMEAppearance{};
+                ::SendMessageW(ctx->hRealtimeChk, BM_SETCHECK,
+                               ctx->cfg.realtimePoll ? BST_CHECKED : BST_UNCHECKED, 0);
+                ::SetWindowTextW(ctx->hIntervalEdit, std::to_wstring(ctx->cfg.pollIntervalMs).c_str());
+                ::EnableWindow(ctx->hIntervalEdit, ctx->cfg.realtimePoll);
+                ::EnableWindow(ctx->hIntervalSpin, ctx->cfg.realtimePoll);
                 UpdateFontButtonText(ctx->hFontBtn, ctx->cfg.fontName, ctx->cfg.fontSize);
                 RefreshControls(ctx);
                 return 0;
             case IDOK:
+            {
+                wchar_t buf[32]{};
+                ::GetWindowTextW(ctx->hIntervalEdit, buf, static_cast<int>(_countof(buf)));
+                int ms = _wtoi(buf);
+                if (ms < 16)   ms = 16;
+                if (ms > 2000) ms = 2000;
+                ctx->cfg.pollIntervalMs = ms;
+                ctx->cfg.realtimePoll = (::SendMessageW(ctx->hRealtimeChk, BM_GETCHECK, 0, 0) == BST_CHECKED);
                 ctx->ok = true;
                 ::DestroyWindow(hWnd);
                 return 0;
+            }
             case IDCANCEL:
                 ::DestroyWindow(hWnd);
                 return 0;
@@ -457,6 +510,10 @@ namespace
 
 bool ShowIMEColorOptions(HWND hParent, IMEAppearance& cfg)
 {
+    // 微调按钮（msctls_updown32）需要初始化 common controls
+    INITCOMMONCONTROLSEX icex{ sizeof(icex), ICC_UPDOWN_CLASS };
+    ::InitCommonControlsEx(&icex);
+
     if (!EnsureWindowClass())
         return false;
 
